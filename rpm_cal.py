@@ -348,57 +348,91 @@ if st.button("คำนวณสูตรและหา %RPM/เวลา"):
     if groups is None:
         st.error("ไม่สามารถคำนวณ %RPM ได้ — ไม่มีข้อมูลทดลอง")
     else:
-        # search parameters
-        st.subheader("การตั้งค่าสำหรับการค้นหา (search params)")
-        col_param1, col_param2 = st.columns(2)
-        with col_param1:
-            tol = st.slider("Allowed relative error per hopper (tol)", 0.01, 0.5, 0.05, key="tol_slider")
-            t_min = st.number_input("t_min (s)", value=1.0, step=1.0, min_value=0.1, key="t_min_input")
-            t_max = st.number_input("t_max (s)", value=3600.0, step=100.0, min_value=1.0, max_value=86400.0, key="t_max_input")
-        with col_param2:
-            rpm_min_pct = st.slider("ช่วงรอบต่ำสุด (%)", 0, 100, 20, key="rpm_min_slider", help="กำหนดรอบต่ำสุดที่ต้องการใช้")
-            rpm_max_pct = st.slider("ช่วงรอบสูงสุด (%)", 0, 100, 80, key="rpm_max_slider", help="กำหนดรอบสูงสุดที่ต้องการใช้")
-            
-            # Validate ว่า min < max
-            if rpm_min_pct >= rpm_max_pct:
-                st.warning("⚠️ ช่วงรอบต่ำสุดต้องน้อยกว่าช่วงรอบสูงสุด")
-                rpm_min_pct = min(rpm_min_pct, rpm_max_pct - 1)
-                rpm_max_pct = max(rpm_max_pct, rpm_min_pct + 1)
+        # search parameters - ปรับค่าก่อนกดคำนวณ
+        st.subheader("⚙️ การตั้งค่าสำหรับการค้นหา")
+        
+        with st.expander("🎚️ ปรับค่าพารามิเตอร์", expanded=True):
+            col_param1, col_param2 = st.columns(2)
+            with col_param1:
+                st.markdown("**ช่วงเวลาการทำงาน**")
+                time_preset = st.selectbox(
+                    "เลือกช่วงเวลาที่ต้องการ",
+                    ["กำหนดเอง", "รวดเร็ว (1-10 นาที)", "ปานกลาง (10-30 นาที)", "ช้า (30-60 นาที)", "ยาวนาน (1-2 ชั่วโมง)"],
+                    key="time_preset"
+                )
+                
+                if time_preset == "รวดเร็ว (1-10 นาที)":
+                    t_min_default, t_max_default = 60.0, 600.0
+                elif time_preset == "ปานกลาง (10-30 นาที)":
+                    t_min_default, t_max_default = 600.0, 1800.0
+                elif time_preset == "ช้า (30-60 นาที)":
+                    t_min_default, t_max_default = 1800.0, 3600.0
+                elif time_preset == "ยาวนาน (1-2 ชั่วโมง)":
+                    t_min_default, t_max_default = 3600.0, 7200.0
+                else:  # กำหนดเอง
+                    t_min_default, t_max_default = 1.0, 3600.0
+                
+                t_min = st.number_input("เวลาต่ำสุด (วินาที)", value=t_min_default, step=60.0, min_value=0.1, key="t_min_input")
+                t_max = st.number_input("เวลาสูงสุด (วินาที)", value=t_max_default, step=60.0, min_value=1.0, max_value=86400.0, key="t_max_input")
+                st.caption(f"ช่วง: {t_min/60:.1f} - {t_max/60:.1f} นาที")
+                
+            with col_param2:
+                st.markdown("**ช่วงรอบเครื่อง (% RPM)**")
+                rpm_min_pct = st.slider("รอบต่ำสุด (%)", 0, 100, 20, key="rpm_min_slider", 
+                                       help="กำหนดรอบต่ำสุดที่ต้องการใช้ เพื่อลดภาระเครื่องจักร")
+                rpm_max_pct = st.slider("รอบสูงสุด (%)", 0, 100, 80, key="rpm_max_slider", 
+                                       help="กำหนดรอบสูงสุดที่ต้องการใช้ ควรอยู่ที่ 70-80% เพื่ออายุการใช้งานที่ดี")
+                
+                # Validate ว่า min < max
+                if rpm_min_pct >= rpm_max_pct:
+                    st.error("⚠️ ช่วงรอบต่ำสุดต้องน้อยกว่าช่วงรอบสูงสุด")
+                
+                st.markdown("**ความแม่นยำ**")
+                tol = st.slider("ความคลาดเคลื่อนที่ยอมรับได้", 0.01, 0.5, 0.05, key="tol_slider",
+                              help="ค่าน้อย = แม่นยำมากขึ้น แต่อาจหาคำตอบได้ยากขึ้น")
 
-        # run search
-        with st.spinner("กำลังค้นหาเวลาและ %RPM ..."):
-            found = find_t_for_parent_masses(groups, parent_targets_g, t_min=float(t_min), t_max=float(t_max), t_steps=800, tol=float(tol), cap_by_tall=False, rpm_min_pct=rpm_min_pct, rpm_max_pct=rpm_max_pct)
-        if found.get('found'):
-            res = found['result']
-            st.success(f"พบการตั้งค่า: เวลา/รอบ = {res['t']:.1f} s ({res['t']/60.0:.2f} min)")
-            rows = []
-            for h in ['N','P','K']:
-                s = res['settings'][h]
-                rows.append({
-                    'hopper': h,
-                    'ปรับรอบ (%)': int(round(s['rpm_pct'])),
-                    'RPM': int(round(s['rpm_actual'])),
-                    'กิโลกรัม': round(s['mass_g']/1000.0, 3)
-                })
-            st.table(pd.DataFrame(rows))
-            total_usable = res['total_mass_g']/1000.0
-            total_loss = res['total_loss_g']/1000.0
-            total_produced = total_usable + total_loss
-            st.write(f"**รวม:** ผลิตได้ {total_produced:.3f} kg | ใช้งานได้ {total_usable:.3f} kg | สูญเสีย {total_loss:.3f} kg ({(total_loss/total_produced*100):.1f}%)")
-        else:
-            best = found.get('best_single_run')
-            if best:
-                st.warning("ไม่พบเวลาเดียวที่พอ — แสดง best single-run ที่ใกล้เคียงที่สุด")
-                st.write(f"Best single-run: time = {best['t']:.1f} s → total_mass (kg) = {best['total_mass_g']/1000.0:.3f}")
-                rows = []
-                for h in ['N','P','K']:
-                    r = best['settings'][h]
-                    rows.append({
-                        'hopper': h, 
-                        'ปรับรอบ (%)': int(round(r['rpm_pct'])),
-                        'RPM': int(round(r['rpm_actual'])),
-                        'กิโลกรัม': round(r['mass_g']/1000.0, 3)
-                    })
-                st.table(pd.DataFrame(rows))
+        # ปุ่มคำนวณ - กดเมื่อปรับค่าเสร็จแล้ว
+        calculate_rpm = st.button("🔍 คำนวณหา RPM และเวลาที่เหมาะสม", type="primary", use_container_width=True)
+        
+        if calculate_rpm:
+            if rpm_min_pct >= rpm_max_pct:
+                st.error("❌ กรุณาตรวจสอบช่วงรอบให้ถูกต้อง (ต่ำสุด < สูงสุด)")
             else:
-                st.error("ไม่พบการตั้งค่า — ลองเพิ่ม t_max หรือเพิ่ม tol")
+                # run search
+                with st.spinner("กำลังค้นหาเวลาและ %RPM ที่เหมาะสม..."):
+                    found = find_t_for_parent_masses(groups, parent_targets_g, t_min=float(t_min), t_max=float(t_max), t_steps=800, tol=float(tol), cap_by_tall=False, rpm_min_pct=rpm_min_pct, rpm_max_pct=rpm_max_pct)
+                
+                if found.get('found'):
+                    res = found['result']
+                    st.success(f"✅ พบการตั้งค่า: เวลา/รอบ = {res['t']:.1f} s ({res['t']/60.0:.2f} min)")
+                    rows = []
+                    for h in ['N','P','K']:
+                        s = res['settings'][h]
+                        rows.append({
+                            'hopper': h,
+                            'ปรับรอบ (%)': int(round(s['rpm_pct'])),
+                            'RPM': int(round(s['rpm_actual'])),
+                            'กิโลกรัม': round(s['mass_g']/1000.0, 3)
+                        })
+                    st.table(pd.DataFrame(rows))
+                    total_usable = res['total_mass_g']/1000.0
+                    total_loss = res['total_loss_g']/1000.0
+                    total_produced = total_usable + total_loss
+                    st.write(f"**รวม:** ผลิตได้ {total_produced:.3f} kg | ใช้งานได้ {total_usable:.3f} kg | สูญเสีย {total_loss:.3f} kg ({(total_loss/total_produced*100):.1f}%)")
+                else:
+                    best = found.get('best_single_run')
+                    if best:
+                        st.warning("ไม่พบเวลาเดียวที่พอ — แสดง best single-run ที่ใกล้เคียงที่สุด")
+                        st.write(f"Best single-run: time = {best['t']:.1f} s → total_mass (kg) = {best['total_mass_g']/1000.0:.3f}")
+                        rows = []
+                        for h in ['N','P','K']:
+                            r = best['settings'][h]
+                            rows.append({
+                                'hopper': h, 
+                                'ปรับรอบ (%)': int(round(r['rpm_pct'])),
+                                'RPM': int(round(r['rpm_actual'])),
+                                'กิโลกรัม': round(r['mass_g']/1000.0, 3)
+                            })
+                        st.table(pd.DataFrame(rows))
+                    else:
+                        st.error("ไม่พบการตั้งค่า — ลองเพิ่มช่วงเวลาหรือปรับความแม่นยำ")
