@@ -1,2 +1,5 @@
-streamlit==1.50.0
-# add other dependencies here if your app uses them
+streamlit
+pandas
+numpy
+scipy
+openpyxl
