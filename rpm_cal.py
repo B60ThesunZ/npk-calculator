@@ -352,12 +352,18 @@ if st.button("คำนวณสูตรและหา %RPM/เวลา"):
         st.subheader("การตั้งค่าสำหรับการค้นหา (search params)")
         col_param1, col_param2 = st.columns(2)
         with col_param1:
-            tol = st.slider("Allowed relative error per hopper (tol)", 0.01, 0.5, 0.05)
-            t_min = st.number_input("t_min (s)", value=1.0, step=1.0, min_value=0.1)
-            t_max = st.number_input("t_max (s)", value=3600.0, step=100.0, min_value=1.0, max_value=86400.0)
+            tol = st.slider("Allowed relative error per hopper (tol)", 0.01, 0.5, 0.05, key="tol_slider")
+            t_min = st.number_input("t_min (s)", value=1.0, step=1.0, min_value=0.1, key="t_min_input")
+            t_max = st.number_input("t_max (s)", value=3600.0, step=100.0, min_value=1.0, max_value=86400.0, key="t_max_input")
         with col_param2:
-            rpm_min_pct = st.slider("ช่วงรอบต่ำสุด (%)", 0, 100, 20, help="กำหนดรอบต่ำสุดที่ต้องการใช้")
-            rpm_max_pct = st.slider("ช่วงรอบสูงสุด (%)", 0, 100, 80, help="กำหนดรอบสูงสุดที่ต้องการใช้")
+            rpm_min_pct = st.slider("ช่วงรอบต่ำสุด (%)", 0, 100, 20, key="rpm_min_slider", help="กำหนดรอบต่ำสุดที่ต้องการใช้")
+            rpm_max_pct = st.slider("ช่วงรอบสูงสุด (%)", 0, 100, 80, key="rpm_max_slider", help="กำหนดรอบสูงสุดที่ต้องการใช้")
+            
+            # Validate ว่า min < max
+            if rpm_min_pct >= rpm_max_pct:
+                st.warning("⚠️ ช่วงรอบต่ำสุดต้องน้อยกว่าช่วงรอบสูงสุด")
+                rpm_min_pct = min(rpm_min_pct, rpm_max_pct - 1)
+                rpm_max_pct = max(rpm_max_pct, rpm_min_pct + 1)
 
         # run search
         with st.spinner("กำลังค้นหาเวลาและ %RPM ..."):
