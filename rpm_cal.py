@@ -305,6 +305,12 @@ else:
     groups = create_default_groups()
     proc_df = None
 
+# Initialize session state for results
+if 'rpm_results' not in st.session_state:
+    st.session_state.rpm_results = None
+if 'comp_results' not in st.session_state:
+    st.session_state.comp_results = None
+
 st.header("1) ป้อนสูตร N-P-K และน้ำหนักที่ต้องการ")
 col1, col2 = st.columns(2)
 with col1:
@@ -317,6 +323,18 @@ with col2:
 if st.button("คำนวณสูตรและหา %RPM/เวลา"):
     # composition
     comp = calc_parents_from_formula(N_pct, P_pct, K_pct, total_kg)
+    
+    # Save to session state
+    st.session_state.comp_results = comp
+    st.session_state.parent_targets_g = {
+        'N': max(0.0, comp['A_46_0_0_kg']) * 1000.0,
+        'P': max(0.0, comp['B_18_46_0_kg']) * 1000.0,
+        'K': max(0.0, comp['C_0_0_60_kg']) * 1000.0
+    }
+
+# Display composition results if available
+if st.session_state.comp_results is not None:
+    comp = st.session_state.comp_results
     st.subheader("ผลการคำนวณแม่ปุ๋ย")
     
     # Display in colored metrics
@@ -338,12 +356,8 @@ if st.button("คำนวณสูตรและหา %RPM/เวลา"):
     if comp['A_46_0_0_kg'] < 0 or comp['B_18_46_0_kg'] < 0 or comp['C_0_0_60_kg'] < 0:
         st.warning("⚠️ ค่าบางค่าเป็นลบ — สูตรนี้อาจทำไม่ได้ด้วยแม่ปุ๋ยชุดนี้")
 
-    # prepare target masses per hopper (grams)
-    parent_targets_g = {
-        'N': max(0.0, comp['A_46_0_0_kg']) * 1000.0,
-        'P': max(0.0, comp['B_18_46_0_kg']) * 1000.0,
-        'K': max(0.0, comp['C_0_0_60_kg']) * 1000.0
-    }
+    # Get parent_targets_g from session state
+    parent_targets_g = st.session_state.parent_targets_g
 
     if groups is None:
         st.error("ไม่สามารถคำนวณ %RPM ได้ — ไม่มีข้อมูลทดลอง")
@@ -402,37 +416,44 @@ if st.button("คำนวณสูตรและหา %RPM/เวลา"):
                 with st.spinner("กำลังค้นหาเวลาและ %RPM ที่เหมาะสม..."):
                     found = find_t_for_parent_masses(groups, parent_targets_g, t_min=float(t_min), t_max=float(t_max), t_steps=800, tol=float(tol), cap_by_tall=False, rpm_min_pct=rpm_min_pct, rpm_max_pct=rpm_max_pct)
                 
-                if found.get('found'):
-                    res = found['result']
-                    st.success(f"✅ พบการตั้งค่า: เวลา/รอบ = {res['t']:.1f} s ({res['t']/60.0:.2f} min)")
+                # Save to session state
+                st.session_state.rpm_results = found
+        
+        # Display RPM results if available (outside the button click)
+        if st.session_state.rpm_results is not None:
+            found = st.session_state.rpm_results
+            
+            if found.get('found'):
+                res = found['result']
+                st.success(f"✅ พบการตั้งค่า: เวลา/รอบ = {res['t']:.1f} s ({res['t']/60.0:.2f} min)")
+                rows = []
+                for h in ['N','P','K']:
+                    s = res['settings'][h]
+                    rows.append({
+                        'hopper': h,
+                        'ปรับรอบ (%)': int(round(s['rpm_pct'])),
+                        'RPM': int(round(s['rpm_actual'])),
+                        'กิโลกรัม': round(s['mass_g']/1000.0, 3)
+                    })
+                st.table(pd.DataFrame(rows))
+                total_usable = res['total_mass_g']/1000.0
+                total_loss = res['total_loss_g']/1000.0
+                total_produced = total_usable + total_loss
+                st.write(f"**รวม:** ผลิตได้ {total_produced:.3f} kg | ใช้งานได้ {total_usable:.3f} kg | สูญเสีย {total_loss:.3f} kg ({(total_loss/total_produced*100):.1f}%)")
+            else:
+                best = found.get('best_single_run')
+                if best:
+                    st.warning("ไม่พบเวลาเดียวที่พอ — แสดง best single-run ที่ใกล้เคียงที่สุด")
+                    st.write(f"Best single-run: time = {best['t']:.1f} s → total_mass (kg) = {best['total_mass_g']/1000.0:.3f}")
                     rows = []
                     for h in ['N','P','K']:
-                        s = res['settings'][h]
+                        r = best['settings'][h]
                         rows.append({
-                            'hopper': h,
-                            'ปรับรอบ (%)': int(round(s['rpm_pct'])),
-                            'RPM': int(round(s['rpm_actual'])),
-                            'กิโลกรัม': round(s['mass_g']/1000.0, 3)
+                            'hopper': h, 
+                            'ปรับรอบ (%)': int(round(r['rpm_pct'])),
+                            'RPM': int(round(r['rpm_actual'])),
+                            'กิโลกรัม': round(r['mass_g']/1000.0, 3)
                         })
                     st.table(pd.DataFrame(rows))
-                    total_usable = res['total_mass_g']/1000.0
-                    total_loss = res['total_loss_g']/1000.0
-                    total_produced = total_usable + total_loss
-                    st.write(f"**รวม:** ผลิตได้ {total_produced:.3f} kg | ใช้งานได้ {total_usable:.3f} kg | สูญเสีย {total_loss:.3f} kg ({(total_loss/total_produced*100):.1f}%)")
                 else:
-                    best = found.get('best_single_run')
-                    if best:
-                        st.warning("ไม่พบเวลาเดียวที่พอ — แสดง best single-run ที่ใกล้เคียงที่สุด")
-                        st.write(f"Best single-run: time = {best['t']:.1f} s → total_mass (kg) = {best['total_mass_g']/1000.0:.3f}")
-                        rows = []
-                        for h in ['N','P','K']:
-                            r = best['settings'][h]
-                            rows.append({
-                                'hopper': h, 
-                                'ปรับรอบ (%)': int(round(r['rpm_pct'])),
-                                'RPM': int(round(r['rpm_actual'])),
-                                'กิโลกรัม': round(r['mass_g']/1000.0, 3)
-                            })
-                        st.table(pd.DataFrame(rows))
-                    else:
-                        st.error("ไม่พบการตั้งค่า — ลองเพิ่มช่วงเวลาหรือปรับความแม่นยำ")
+                    st.error("ไม่พบการตั้งค่า — ลองเพิ่มช่วงเวลาหรือปรับความแม่นยำ")
