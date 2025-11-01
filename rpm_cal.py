@@ -133,10 +133,11 @@ def calc_parents_from_formula(N_pct, P_pct, K_pct, total_kg):
     return {'A_46_0_0_kg': x, 'B_18_46_0_kg': y, 'C_0_0_60_kg': z, 'sum_ferts_kg': sum_ferts, 'filler_kg': filler}
 
 # ---------- Planner: find t (equal) and rpm per hopper to match parent masses ----------
-def evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=0.05, cap_by_tall=True):
+def evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=0.05, cap_by_tall=True, rpm_min_pct=20, rpm_max_pct=80):
     """
     target_masses_g: dict {'N': grams, 'P': grams, 'K': grams}
     t: run time in seconds (equal for all hoppers)
+    rpm_min_pct, rpm_max_pct: ช่วง % ของ RPM ที่ต้องการ (20-80%)
     returns dict or error
     """
     rpm_choices = {}
@@ -144,7 +145,13 @@ def evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=0.05, cap_by
         if groups is None or h not in groups:
             return {'ok': False, 'reason': f'No test data for hopper {h}'}
         funcs = groups[h]
-        rpms = np.linspace(funcs['rpm_min'], funcs['rpm_max'], 2000)
+        
+        # จำกัดช่วง RPM ตาม % ที่กำหนด
+        rpm_range = funcs['rpm_max'] - funcs['rpm_min']
+        rpm_min_search = funcs['rpm_min'] + (rpm_range * rpm_min_pct / 100.0)
+        rpm_max_search = funcs['rpm_min'] + (rpm_range * rpm_max_pct / 100.0)
+        
+        rpms = np.linspace(rpm_min_search, rpm_max_search, 2000)
         rates = funcs['rate_func'](rpms)     # g/s
         touts = funcs['tout_func'](rpms)     # s
         talls = funcs['tall_func'](rpms)     # s
@@ -158,8 +165,15 @@ def evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=0.05, cap_by
         idx = np.argmin(np.abs(masses - target))
         mass = float(masses[idx])
         rel_err = abs(mass - target) / (target + 1e-9)
+        
+        # คำนวณ % จาก RPM สูงสุด (2750)
+        rpm_actual = float(rpms[idx])
+        rpm_max_absolute = 2750.0  # ค่า RPM สูงสุดของเครื่อง
+        rpm_percentage = (rpm_actual / rpm_max_absolute) * 100.0
+        
         rpm_choices[h] = {
-            'rpm_pct': float(rpms[idx]),
+            'rpm_actual': rpm_actual,
+            'rpm_pct': rpm_percentage,
             'rate_gps': float(rates[idx]),
             'tout_s': float(touts[idx]),
             'tall_s': float(talls[idx]),
@@ -171,15 +185,16 @@ def evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=0.05, cap_by
     total_loss_g = sum([rpm_choices[h]['loss_g'] for h in rpm_choices])
     return {'ok': True, 't': t, 'settings': rpm_choices, 'total_mass_g': total_mass_g, 'total_loss_g': total_loss_g}
 
-def find_t_for_parent_masses(groups, target_masses_g, t_min=1.0, t_max=3600.0, t_steps=800, tol=0.05, cap_by_tall=True):
+def find_t_for_parent_masses(groups, target_masses_g, t_min=1.0, t_max=3600.0, t_steps=800, tol=0.05, cap_by_tall=True, rpm_min_pct=20, rpm_max_pct=80):
     """
     Search t in [t_min, t_max] (equal for all hoppers) to find first t that yields per-hopper mass within tol.
     If not found, return best single-run (t that maximizes total_mass closeness) for diagnostics.
+    rpm_min_pct, rpm_max_pct: ช่วง % ของ RPM (20-80%)
     """
     t_search = np.linspace(t_min, t_max, t_steps)
     feasible = []
     for t in t_search:
-        res = evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=tol, cap_by_tall=cap_by_tall)
+        res = evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=tol, cap_by_tall=cap_by_tall, rpm_min_pct=rpm_min_pct, rpm_max_pct=rpm_max_pct)
         if res.get('ok'):
             # check each hopper relative error within tol
             errs = [res['settings'][h]['rel_err'] for h in ['N','P','K']]
@@ -195,7 +210,7 @@ def find_t_for_parent_masses(groups, target_masses_g, t_min=1.0, t_max=3600.0, t
     if best is None:
         best_overall = None
         for t in t_search:
-            res = evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=tol, cap_by_tall=cap_by_tall)
+            res = evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=tol, cap_by_tall=cap_by_tall, rpm_min_pct=rpm_min_pct, rpm_max_pct=rpm_max_pct)
             if best_overall is None or res['total_mass_g'] > best_overall['total_mass_g']:
                 best_overall = res
         return {'found': False, 'best_single_run': best_overall}
@@ -328,13 +343,18 @@ if st.button("คำนวณสูตรและหา %RPM/เวลา"):
     else:
         # search parameters
         st.subheader("การตั้งค่าสำหรับการค้นหา (search params)")
-        tol = st.slider("Allowed relative error per hopper (tol)", 0.01, 0.5, 0.05)
-        t_min = st.number_input("t_min (s)", value=1.0, step=1.0, min_value=0.1)
-        t_max = st.number_input("t_max (s)", value=3600.0, step=100.0, min_value=1.0, max_value=86400.0)
+        col_param1, col_param2 = st.columns(2)
+        with col_param1:
+            tol = st.slider("Allowed relative error per hopper (tol)", 0.01, 0.5, 0.05)
+            t_min = st.number_input("t_min (s)", value=1.0, step=1.0, min_value=0.1)
+            t_max = st.number_input("t_max (s)", value=3600.0, step=100.0, min_value=1.0, max_value=86400.0)
+        with col_param2:
+            rpm_min_pct = st.slider("ช่วงรอบต่ำสุด (%)", 0, 100, 20, help="กำหนดรอบต่ำสุดที่ต้องการใช้")
+            rpm_max_pct = st.slider("ช่วงรอบสูงสุด (%)", 0, 100, 80, help="กำหนดรอบสูงสุดที่ต้องการใช้")
 
         # run search
         with st.spinner("กำลังค้นหาเวลาและ %RPM ..."):
-            found = find_t_for_parent_masses(groups, parent_targets_g, t_min=float(t_min), t_max=float(t_max), t_steps=800, tol=float(tol), cap_by_tall=False)
+            found = find_t_for_parent_masses(groups, parent_targets_g, t_min=float(t_min), t_max=float(t_max), t_steps=800, tol=float(tol), cap_by_tall=False, rpm_min_pct=rpm_min_pct, rpm_max_pct=rpm_max_pct)
         if found.get('found'):
             res = found['result']
             st.success(f"พบการตั้งค่า: เวลา/รอบ = {res['t']:.1f} s ({res['t']/60.0:.2f} min)")
@@ -343,7 +363,8 @@ if st.button("คำนวณสูตรและหา %RPM/เวลา"):
                 s = res['settings'][h]
                 rows.append({
                     'hopper': h,
-                    'ปรับรอบ': int(round(s['rpm_pct'])),
+                    'ปรับรอบ (%)': int(round(s['rpm_pct'])),
+                    'RPM': int(round(s['rpm_actual'])),
                     'กิโลกรัม': round(s['mass_g']/1000.0, 3)
                 })
             st.table(pd.DataFrame(rows))
@@ -356,7 +377,12 @@ if st.button("คำนวณสูตรและหา %RPM/เวลา"):
                 rows = []
                 for h in ['N','P','K']:
                     r = best['settings'][h]
-                    rows.append({'hopper': h, 'ปรับรอบ': int(round(r['rpm_pct'])), 'กิโลกรัม': round(r['mass_g']/1000.0, 3)})
+                    rows.append({
+                        'hopper': h, 
+                        'ปรับรอบ (%)': int(round(r['rpm_pct'])),
+                        'RPM': int(round(r['rpm_actual'])),
+                        'กิโลกรัม': round(r['mass_g']/1000.0, 3)
+                    })
                 st.table(pd.DataFrame(rows))
             else:
                 st.error("ไม่พบการตั้งค่า — ลองเพิ่ม t_max หรือเพิ่ม tol")
