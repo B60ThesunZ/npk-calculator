@@ -433,13 +433,9 @@ if st.session_state.comp_results is not None:
                         'hopper': h,
                         'ปรับรอบ (%)': int(round(s['rpm_pct'])),
                         'RPM': int(round(s['rpm_actual'])),
-                        'กิโลกรัม': round(s['mass_g']/1000.0, 3)
+                        'กิโลกรัม': round(s['mass_g']/1000.0, 1)
                     })
                 st.table(pd.DataFrame(rows))
-                total_usable = res['total_mass_g']/1000.0
-                total_loss = res['total_loss_g']/1000.0
-                total_produced = total_usable + total_loss
-                st.write(f"**รวม:** ผลิตได้ {total_produced:.3f} kg | ใช้งานได้ {total_usable:.3f} kg | สูญเสีย {total_loss:.3f} kg ({(total_loss/total_produced*100):.1f}%)")
             else:
                 best = found.get('best_single_run')
                 if best:
@@ -452,7 +448,7 @@ if st.session_state.comp_results is not None:
                             'hopper': h, 
                             'ปรับรอบ (%)': int(round(r['rpm_pct'])),
                             'RPM': int(round(r['rpm_actual'])),
-                            'กิโลกรัม': round(r['mass_g']/1000.0, 3)
+                               'กิโลกรัม': round(r['mass_g']/1000.0, 1)
                         })
                     st.table(pd.DataFrame(rows))
                 else:
