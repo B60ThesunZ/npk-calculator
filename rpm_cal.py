@@ -155,16 +155,22 @@ def evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=0.05, cap_by
         rates = funcs['rate_func'](rpms)     # g/s
         touts = funcs['tout_func'](rpms)     # s
         talls = funcs['tall_func'](rpms)     # s
+        losses = funcs['loss_func'](rpms)    # g
+        
         if cap_by_tall:
             eff_times = np.maximum(0.0, np.minimum(t, talls) - touts)
         else:
             eff_times = np.maximum(0.0, t - touts)
         masses = rates * eff_times  # grams delivered
+        usable_masses = masses - losses  # หักค่า loss ออก
+        
         target = float(target_masses_g.get(h, 0.0))
-        # pick rpm that gives mass closest to target
-        idx = np.argmin(np.abs(masses - target))
-        mass = float(masses[idx])
-        rel_err = abs(mass - target) / (target + 1e-9)
+        # pick rpm that gives usable mass closest to target
+        idx = np.argmin(np.abs(usable_masses - target))
+        mass_total = float(masses[idx])
+        loss = float(losses[idx])
+        mass_usable = float(usable_masses[idx])
+        rel_err = abs(mass_usable - target) / (target + 1e-9)
         
         # คำนวณ % จาก RPM สูงสุด (2750)
         rpm_actual = float(rpms[idx])
@@ -177,9 +183,10 @@ def evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=0.05, cap_by
             'rate_gps': float(rates[idx]),
             'tout_s': float(touts[idx]),
             'tall_s': float(talls[idx]),
-            'mass_g': mass,
+            'mass_g': mass_usable,  # ใช้ค่าหลังหัก loss
+            'mass_total_g': mass_total,  # เก็บค่าก่อนหัก loss ไว้ด้วย
             'rel_err': rel_err,
-            'loss_g': float(funcs['loss_func'](rpms[idx]))
+            'loss_g': loss
         }
     total_mass_g = sum([rpm_choices[h]['mass_g'] for h in rpm_choices])
     total_loss_g = sum([rpm_choices[h]['loss_g'] for h in rpm_choices])
@@ -368,7 +375,10 @@ if st.button("คำนวณสูตรและหา %RPM/เวลา"):
                     'กิโลกรัม': round(s['mass_g']/1000.0, 3)
                 })
             st.table(pd.DataFrame(rows))
-            st.write(f"Total produced (kg): {res['total_mass_g']/1000.0:.3f} ; Predicted loss (kg): {res['total_loss_g']/1000.0:.3f}")
+            total_usable = res['total_mass_g']/1000.0
+            total_loss = res['total_loss_g']/1000.0
+            total_produced = total_usable + total_loss
+            st.write(f"**รวม:** ผลิตได้ {total_produced:.3f} kg | ใช้งานได้ {total_usable:.3f} kg | สูญเสีย {total_loss:.3f} kg ({(total_loss/total_produced*100):.1f}%)")
         else:
             best = found.get('best_single_run')
             if best:
