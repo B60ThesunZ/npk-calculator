@@ -158,19 +158,19 @@ DEFAULT_EXCEL = "C:\\Users\\Lenovo\\OneDrive\\Desktop\\NPK cal\\กระพ้�
 # --------- HELPERS ----------
 def create_default_groups():
     """สร้างข้อมูลตัวอย่างเริ่มต้นสำหรับการทดสอบ (ใช้เมื่อไม่มีไฟล์ Excel)"""
-    # ข้อมูลตัวอย่างพื้นฐาน: %rpm (10-80%) และ rate (g/s) สำหรับ N, P, K
+    # ข้อมูลตัวอย่างพื้นฐาน: rpm และ rate (g/s) สำหรับ N, P, K
     default_data = {
-        'N': {'rpms': [10, 20, 30, 40, 50, 60, 70, 80], 
-              'rates': [2, 8, 14, 20, 26, 32, 38, 44]},
-        'P': {'rpms': [10, 20, 30, 40, 50, 60, 70, 80], 
-              'rates': [1.5, 6, 10.5, 15, 19.5, 24, 28.5, 33]},
-        'K': {'rpms': [10, 20, 30, 40, 50, 60, 70, 80], 
-              'rates': [1, 4, 7, 10, 13, 16, 19, 22]}
+        'N': {'rpms': [10, 500, 1000, 1500, 2000, 2500, 2750], 
+              'rates': [0.2, 10, 20, 30, 40, 50, 55]},
+        'P': {'rpms': [10, 500, 1000, 1500, 2000, 2500, 2750], 
+              'rates': [0.15, 7.5, 15, 22.5, 30, 37.5, 41.25]},
+        'K': {'rpms': [10, 500, 1000, 1500, 2000, 2500, 2750], 
+              'rates': [0.1, 5, 10, 15, 20, 25, 27.5]}
     }
     
     groups = {}
     for h, data in default_data.items():
-        xs = np.array(data['rpms'], dtype=float)  # %RPM
+        xs = np.array(data['rpms'], dtype=float)
         rates = np.array(data['rates'], dtype=float)
         touts = np.zeros_like(xs)
         talls = np.full_like(xs, 3600.0)  # 1 ชั่วโมง
@@ -179,7 +179,7 @@ def create_default_groups():
         groups[h] = {
             'rpm_min': float(xs.min()), 
             'rpm_max': float(xs.max()),
-            'is_percentage': True,
+            'is_percentage': False,
             'rate_func': interp1d(xs, rates, kind='linear', fill_value='extrapolate', bounds_error=False),
             'tout_func': interp1d(xs, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
             'tall_func': interp1d(xs, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
