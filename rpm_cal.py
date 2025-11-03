@@ -247,28 +247,19 @@ def load_testdata(path):
         # ถ้าค่าสูงสุด <= 100 แสดงว่าเป็น %RPM อยู่แล้ว
         is_percentage = xs.max() <= 100
         
-        if is_percentage:
-            # เก็บ % ไว้และแปลงเป็น RPM จริงสำหรับ interpolation
-            rpm_pct_values = xs.copy()
-            rpm_actual_values = xs * 2750.0 / 100.0  # แปลง % เป็น RPM จริง
-        else:
-            # ข้อมูลเป็น RPM จริงอยู่แล้ว
-            rpm_actual_values = xs
-            rpm_pct_values = xs * 100.0 / 2750.0  # แปลง RPM เป็น %
-        
         rates = sub[col_rate].values[order] if col_rate in sub.columns else np.zeros_like(xs)
         touts = sub[col_tout].values[order] if col_tout in sub.columns else np.zeros_like(xs)
         talls = sub[col_tall].values[order] if col_tall in sub.columns else np.full_like(xs, 1e6)
         losses = sub[col_loss].values[order] if col_loss in sub.columns else np.zeros_like(xs)
         try:
             groups[h] = {
-                'rpm_min': float(rpm_pct_values.min()), 
-                'rpm_max': float(rpm_pct_values.max()),
+                'rpm_min': float(xs.min()), 
+                'rpm_max': float(xs.max()),
                 'is_percentage': is_percentage,
-                'rate_func': interp1d(rpm_pct_values, rates, kind='linear', fill_value='extrapolate', bounds_error=False),
-                'tout_func': interp1d(rpm_pct_values, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
-                'tall_func': interp1d(rpm_pct_values, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
-                'loss_func': interp1d(rpm_pct_values, losses, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'rate_func': interp1d(xs, rates, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'tout_func': interp1d(xs, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'tall_func': interp1d(xs, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'loss_func': interp1d(xs, losses, kind='linear', fill_value='extrapolate', bounds_error=False),
                 'data': sub
             }
         except Exception as e:
