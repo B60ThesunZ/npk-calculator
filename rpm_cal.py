@@ -176,6 +176,13 @@ def create_default_groups():
         talls = np.full_like(xs, 3600.0)  # 1 ชั่วโมง
         losses = np.zeros_like(xs)
         
+        data_df = pd.DataFrame({
+            'hopper': h,
+            'rpm': xs,
+            'rpm_pct': xs * 100.0 / 2750.0,
+            'g/s': rates
+        })
+
         groups[h] = {
             'rpm_min': float(xs.min()), 
             'rpm_max': float(xs.max()),
@@ -184,7 +191,10 @@ def create_default_groups():
             'tout_func': interp1d(xs, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
             'tall_func': interp1d(xs, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
             'loss_func': interp1d(xs, losses, kind='linear', fill_value='extrapolate', bounds_error=False),
-            'data': pd.DataFrame({'hopper': h, 'rpm': xs, 'g/s': rates})
+            'raw_rpms': xs,
+            'raw_rpm_pct': xs * 100.0 / 2750.0,
+            'raw_rates': rates,
+            'data': data_df
         }
     return groups
 
@@ -239,29 +249,40 @@ def load_testdata(path):
     groups = {}
     for h in proc['hopper'].unique():
         sub = proc[proc['hopper'] == h].copy()
-        xs = sub['rpm'].values.astype(float)
-        order = np.argsort(xs)
-        xs = xs[order]
-        
-        # ตรวจสอบว่าข้อมูลเป็น %RPM (0-100) หรือ RPM จริง (>100)
-        # ถ้าค่าสูงสุด <= 100 แสดงว่าเป็น %RPM → แปลงเป็น RPM เต็ม
-        if xs.max() <= 100:
-            # แปลง %RPM เป็น RPM เต็ม (0-2750)
-            xs = xs * 2750.0 / 100.0
-        
-        rates = sub[col_rate].values[order] if col_rate in sub.columns else np.zeros_like(xs)
-        touts = sub[col_tout].values[order] if col_tout in sub.columns else np.zeros_like(xs)
-        talls = sub[col_tall].values[order] if col_tall in sub.columns else np.full_like(xs, 1e6)
-        losses = sub[col_loss].values[order] if col_loss in sub.columns else np.zeros_like(xs)
+        xs_original = sub['rpm'].values.astype(float)
+        order = np.argsort(xs_original)
+        sub = sub.iloc[order].copy()
+        xs_sorted = xs_original[order]
+
+        is_percentage = xs_sorted.max() <= 100
+        if is_percentage:
+            rpm_actual = xs_sorted * 2750.0 / 100.0
+            rpm_pct = xs_sorted
+        else:
+            rpm_actual = xs_sorted
+            rpm_pct = xs_sorted * 100.0 / 2750.0
+
+        sub['rpm'] = rpm_actual
+        sub['rpm_actual'] = rpm_actual
+        sub['rpm_pct'] = rpm_pct
+
+        rates = sub[col_rate].values.astype(float) if col_rate in sub.columns else np.zeros_like(rpm_actual)
+        touts = sub[col_tout].values.astype(float) if col_tout in sub.columns else np.zeros_like(rpm_actual)
+        talls = sub[col_tall].values.astype(float) if col_tall in sub.columns else np.full_like(rpm_actual, 1e6)
+        losses = sub[col_loss].values.astype(float) if col_loss in sub.columns else np.zeros_like(rpm_actual)
+
         try:
             groups[h] = {
-                'rpm_min': float(xs.min()), 
-                'rpm_max': float(xs.max()),
-                'is_percentage': False,  # เก็บเป็น RPM เต็มเสมอ
-                'rate_func': interp1d(xs, rates, kind='linear', fill_value='extrapolate', bounds_error=False),
-                'tout_func': interp1d(xs, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
-                'tall_func': interp1d(xs, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
-                'loss_func': interp1d(xs, losses, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'rpm_min': float(rpm_actual.min()), 
+                'rpm_max': float(rpm_actual.max()),
+                'is_percentage': False,
+                'rate_func': interp1d(rpm_actual, rates, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'tout_func': interp1d(rpm_actual, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'tall_func': interp1d(rpm_actual, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'loss_func': interp1d(rpm_actual, losses, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'raw_rpms': rpm_actual,
+                'raw_rpm_pct': rpm_pct,
+                'raw_rates': rates,
                 'data': sub
             }
         except Exception as e:
@@ -518,6 +539,30 @@ if st.session_state.comp_results is not None:
     }.get(data_source, data_source)
     if source_label:
         st.caption(f"แหล่งข้อมูล: {source_label}")
+
+    with st.expander("📈 ข้อมูลสอบเทียบ (RPM ↔ g/s)", expanded=False):
+        preview_rows = []
+        if groups is not None:
+            for hopper in ['N', 'P', 'K']:
+                if hopper not in groups:
+                    continue
+                raw_rpms = np.asarray(groups[hopper].get('raw_rpms', []), dtype=float)
+                raw_pct = np.asarray(groups[hopper].get('raw_rpm_pct', raw_rpms * 100.0 / 2750.0), dtype=float)
+                raw_rates = np.asarray(groups[hopper].get('raw_rates', []), dtype=float)
+                if raw_rates.size == 0 and raw_rpms.size:
+                    raw_rates = np.zeros_like(raw_rpms)
+                for rpm_val, pct_val, rate_val in zip(raw_rpms, raw_pct, raw_rates):
+                    preview_rows.append({
+                        'Hopper': hopper,
+                        '%RPM': round(pct_val, 1),
+                        'RPM': round(rpm_val, 1),
+                        'g/s': round(rate_val, 3)
+                    })
+        if preview_rows:
+            preview_df = pd.DataFrame(preview_rows).sort_values(['Hopper', 'RPM']).reset_index(drop=True)
+            st.dataframe(preview_df, width='stretch')
+        else:
+            st.write("ไม่มีข้อมูลสอบเทียบให้แสดง")
     
     # Display in colored metrics
     col1, col2, col3 = st.columns(3)
@@ -588,7 +633,7 @@ if st.session_state.comp_results is not None:
                               help="ค่าน้อย = แม่นยำมากขึ้น แต่อาจหาคำตอบได้ยากขึ้น")
 
         # ปุ่มคำนวณ - กดเมื่อปรับค่าเสร็จแล้ว
-        calculate_rpm = st.button("🔍 คำนวณหา RPM และเวลาที่เหมาะสม", type="primary", use_container_width=True)
+        calculate_rpm = st.button("🔍 คำนวณหา RPM และเวลาที่เหมาะสม", type="primary", width='stretch')
         
         if calculate_rpm:
             if rpm_min_pct >= rpm_max_pct:
