@@ -6,7 +6,151 @@ from scipy.interpolate import interp1d
 from math import ceil
 import os
 
-st.set_page_config(page_title="โปรแกรมคำนวณสูตรปุ๋ยและแนะนำการปรับค่าเครื่องจ่ายเกลียวลำเลียง AGN03", layout="wide")
+st.set_page_config(
+    page_title="โปรแกรมคำนวณสูตรปุ๋ยและแนะนำการปรับค่าเครื่องจ่ายเกลียวลำเลียง AGN03", 
+    layout="wide",
+    page_icon="🌾"
+)
+
+# Custom CSS for agricultural theme
+st.markdown("""
+<style>
+    /* Main theme colors - Agricultural/Farm theme */
+    :root {
+        --primary-green: #4a7c59;
+        --light-green: #8fbc8f;
+        --earth-brown: #8b7355;
+        --cream: #f5f5dc;
+        --soft-yellow: #f0e68c;
+    }
+    
+    /* Header styling */
+    h1 {
+        color: #2d5016 !important;
+        font-weight: 700 !important;
+        padding: 1rem 0 !important;
+        border-bottom: 3px solid #8fbc8f !important;
+    }
+    
+    h2 {
+        color: #4a7c59 !important;
+        font-weight: 600 !important;
+        margin-top: 1.5rem !important;
+    }
+    
+    h3 {
+        color: #5a8a6a !important;
+    }
+    
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #f0f8f0 0%, #e8f5e8 100%) !important;
+    }
+    
+    [data-testid="stSidebar"] h2 {
+        color: #2d5016 !important;
+    }
+    
+    /* Metric styling */
+    [data-testid="stMetricValue"] {
+        font-size: 1.8rem !important;
+        font-weight: 600 !important;
+    }
+    
+    /* Button styling */
+    .stButton > button {
+        background: linear-gradient(135deg, #5a8a6a 0%, #4a7c59 100%) !important;
+        color: white !important;
+        font-weight: 600 !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 0.6rem 1.5rem !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #4a7c59 0%, #3a6c49 100%) !important;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15) !important;
+        transform: translateY(-1px) !important;
+    }
+    
+    /* Input fields */
+    .stNumberInput > div > div > input {
+        border: 2px solid #c8e6c9 !important;
+        border-radius: 6px !important;
+    }
+    
+    .stNumberInput > div > div > input:focus {
+        border-color: #4a7c59 !important;
+        box-shadow: 0 0 0 0.2rem rgba(74, 124, 89, 0.25) !important;
+    }
+    
+    /* Slider styling */
+    .stSlider > div > div > div {
+        background: linear-gradient(90deg, #c8e6c9 0%, #4a7c59 100%) !important;
+    }
+    
+    /* Table styling */
+    table {
+        background-color: #ffffff !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+    }
+    
+    thead tr th {
+        background: linear-gradient(135deg, #5a8a6a 0%, #4a7c59 100%) !important;
+        color: white !important;
+        font-weight: 600 !important;
+        padding: 0.75rem !important;
+    }
+    
+    tbody tr:nth-child(odd) {
+        background-color: #f9fdf9 !important;
+    }
+    
+    tbody tr:hover {
+        background-color: #e8f5e8 !important;
+    }
+    
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        background-color: #f0f8f0 !important;
+        border-radius: 6px !important;
+        border: 1px solid #c8e6c9 !important;
+        font-weight: 600 !important;
+        color: #2d5016 !important;
+    }
+    
+    /* Success/Warning/Error messages */
+    .stSuccess {
+        background-color: #d4edda !important;
+        border-left: 4px solid #4a7c59 !important;
+    }
+    
+    .stWarning {
+        background-color: #fff3cd !important;
+        border-left: 4px solid #ffc107 !important;
+    }
+    
+    .stError {
+        background-color: #f8d7da !important;
+        border-left: 4px solid #dc3545 !important;
+    }
+    
+    /* Info boxes */
+    .stAlert {
+        border-radius: 8px !important;
+    }
+    
+    /* Divider */
+    hr {
+        border-color: #c8e6c9 !important;
+        margin: 1.5rem 0 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # --------- CONFIG ----------
 DEFAULT_EXCEL = "C:\\Users\\Lenovo\\OneDrive\\Desktop\\NPK cal\\กระพ้อ.xlsx"  # ใช้เมื่อรันใน local เท่านั้น
@@ -97,17 +241,33 @@ def load_testdata(path):
         xs = sub['rpm'].values.astype(float)
         order = np.argsort(xs)
         xs = xs[order]
+        
+        # ตรวจสอบว่าข้อมูลเป็น %RPM (0-100) หรือ RPM จริง (>100)
+        # ถ้าค่าสูงสุด <= 100 แสดงว่าเป็น %RPM อยู่แล้ว
+        is_percentage = xs.max() <= 100
+        
+        if is_percentage:
+            # เก็บ % ไว้และแปลงเป็น RPM จริงสำหรับ interpolation
+            rpm_pct_values = xs.copy()
+            rpm_actual_values = xs * 2750.0 / 100.0  # แปลง % เป็น RPM จริง
+        else:
+            # ข้อมูลเป็น RPM จริงอยู่แล้ว
+            rpm_actual_values = xs
+            rpm_pct_values = xs * 100.0 / 2750.0  # แปลง RPM เป็น %
+        
         rates = sub[col_rate].values[order] if col_rate in sub.columns else np.zeros_like(xs)
         touts = sub[col_tout].values[order] if col_tout in sub.columns else np.zeros_like(xs)
         talls = sub[col_tall].values[order] if col_tall in sub.columns else np.full_like(xs, 1e6)
         losses = sub[col_loss].values[order] if col_loss in sub.columns else np.zeros_like(xs)
         try:
             groups[h] = {
-                'rpm_min': float(xs.min()), 'rpm_max': float(xs.max()),
-                'rate_func': interp1d(xs, rates, kind='linear', fill_value='extrapolate', bounds_error=False),
-                'tout_func': interp1d(xs, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
-                'tall_func': interp1d(xs, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
-                'loss_func': interp1d(xs, losses, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'rpm_min': float(rpm_pct_values.min()), 
+                'rpm_max': float(rpm_pct_values.max()),
+                'is_percentage': is_percentage,
+                'rate_func': interp1d(rpm_pct_values, rates, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'tout_func': interp1d(rpm_pct_values, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'tall_func': interp1d(rpm_pct_values, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
+                'loss_func': interp1d(rpm_pct_values, losses, kind='linear', fill_value='extrapolate', bounds_error=False),
                 'data': sub
             }
         except Exception as e:
@@ -146,12 +306,12 @@ def evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=0.05, cap_by
             return {'ok': False, 'reason': f'No test data for hopper {h}'}
         funcs = groups[h]
         
-        # จำกัดช่วง RPM ตาม % ที่กำหนด
+        # จำกัดช่วง RPM ตาม % ที่กำหนด (ใช้ %RPM โดยตรง)
         rpm_range = funcs['rpm_max'] - funcs['rpm_min']
         rpm_min_search = funcs['rpm_min'] + (rpm_range * rpm_min_pct / 100.0)
         rpm_max_search = funcs['rpm_min'] + (rpm_range * rpm_max_pct / 100.0)
         
-        rpms = np.linspace(rpm_min_search, rpm_max_search, 2000)
+        rpms = np.linspace(rpm_min_search, rpm_max_search, 2000)  # %RPM
         rates = funcs['rate_func'](rpms)     # g/s
         touts = funcs['tout_func'](rpms)     # s
         talls = funcs['tall_func'](rpms)     # s
@@ -172,14 +332,13 @@ def evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=0.05, cap_by
         mass_usable = float(usable_masses[idx])
         rel_err = abs(mass_usable - target) / (target + 1e-9)
         
-        # คำนวณ % จาก RPM สูงสุด (2750)
-        rpm_actual = float(rpms[idx])
-        rpm_max_absolute = 2750.0  # ค่า RPM สูงสุดของเครื่อง
-        rpm_percentage = (rpm_actual / rpm_max_absolute) * 100.0
+        # rpms[idx] เป็น %RPM อยู่แล้ว (เพราะเราใช้ %RPM ใน interpolation)
+        rpm_pct = float(rpms[idx])
+        rpm_actual = rpm_pct * 2750.0 / 100.0  # แปลง % เป็น RPM จริง
         
         rpm_choices[h] = {
             'rpm_actual': rpm_actual,
-            'rpm_pct': rpm_percentage,
+            'rpm_pct': rpm_pct,
             'rate_gps': float(rates[idx]),
             'tout_s': float(touts[idx]),
             'tall_s': float(talls[idx]),
@@ -224,10 +383,10 @@ def find_t_for_parent_masses(groups, target_masses_g, t_min=1.0, t_max=3600.0, t
     return {'found': False, 'best_single_run': best}
 
 # ---------- Streamlit UI ----------
-st.title("โปรแกรมคำนวณสูตรปุ๋ยและแนะนำการปรับค่าเครื่องจ่ายเกลียวลำเลียง AGN03")
+st.title("🌾 โปรแกรมคำนวณสูตรปุ๋ยและแนะนำการปรับค่าเครื่องจ่ายเกลียวลำเลียง AGN03")
 
 # Sidebar with instructions
-st.sidebar.header("📖 วิธีใช้งาน")
+st.sidebar.header("📖 คู่มือการใช้งาน")
 st.sidebar.markdown("""
 ### ขั้นตอนการใช้งาน
 1. **อัปโหลดไฟล์ข้อมูลทดลอง** (ถ้ามี) หรือใช้ข้อมูลตัวอย่าง
@@ -426,6 +585,13 @@ if st.session_state.comp_results is not None:
             if found.get('found'):
                 res = found['result']
                 st.success(f"✅ พบการตั้งค่า: เวลา/รอบ = {res['t']:.1f} s ({res['t']/60.0:.2f} min)")
+                
+                # แนะนำการปรับรอบ
+                st.write("**แนะนำการปรับรอบ:**")
+                for h in ['N','P','K']:
+                    s = res['settings'][h]
+                    st.write(f"🔧 Hopper {h}: ปรับรอบที่ **{int(round(s['rpm_pct']))}%** (RPM = {s['rpm_actual']:.1f}) → ได้ {s['mass_g']/1000.0:.3f} kg")
+                
                 rows = []
                 for h in ['N','P','K']:
                     s = res['settings'][h]
@@ -433,9 +599,13 @@ if st.session_state.comp_results is not None:
                         'hopper': h,
                         'ปรับรอบ (%)': int(round(s['rpm_pct'])),
                         'RPM': int(round(s['rpm_actual'])),
-                        'กิโลกรัม': round(s['mass_g']/1000.0, 1)
+                        'กิโลกรัม': round(s['mass_g']/1000.0, 3)
                     })
                 st.table(pd.DataFrame(rows))
+                total_usable = res['total_mass_g']/1000.0
+                total_loss = res['total_loss_g']/1000.0
+                total_produced = total_usable + total_loss
+                st.write(f"**รวม:** ผลิตได้ {total_produced:.3f} kg | ใช้งานได้ {total_usable:.3f} kg | สูญเสีย {total_loss:.3f} kg ({(total_loss/total_produced*100):.1f}%)")
             else:
                 best = found.get('best_single_run')
                 if best:
@@ -448,7 +618,7 @@ if st.session_state.comp_results is not None:
                             'hopper': h, 
                             'ปรับรอบ (%)': int(round(r['rpm_pct'])),
                             'RPM': int(round(r['rpm_actual'])),
-                               'กิโลกรัม': round(r['mass_g']/1000.0, 1)
+                            'กิโลกรัม': round(r['mass_g']/1000.0, 3)
                         })
                     st.table(pd.DataFrame(rows))
                 else:
