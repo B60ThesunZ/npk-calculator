@@ -244,8 +244,10 @@ def load_testdata(path):
         xs = xs[order]
         
         # ตรวจสอบว่าข้อมูลเป็น %RPM (0-100) หรือ RPM จริง (>100)
-        # ถ้าค่าสูงสุด <= 100 แสดงว่าเป็น %RPM อยู่แล้ว
-        is_percentage = xs.max() <= 100
+        # ถ้าค่าสูงสุด <= 100 แสดงว่าเป็น %RPM → แปลงเป็น RPM เต็ม
+        if xs.max() <= 100:
+            # แปลง %RPM เป็น RPM เต็ม (0-2750)
+            xs = xs * 2750.0 / 100.0
         
         rates = sub[col_rate].values[order] if col_rate in sub.columns else np.zeros_like(xs)
         touts = sub[col_tout].values[order] if col_tout in sub.columns else np.zeros_like(xs)
@@ -255,7 +257,7 @@ def load_testdata(path):
             groups[h] = {
                 'rpm_min': float(xs.min()), 
                 'rpm_max': float(xs.max()),
-                'is_percentage': is_percentage,
+                'is_percentage': False,  # เก็บเป็น RPM เต็มเสมอ
                 'rate_func': interp1d(xs, rates, kind='linear', fill_value='extrapolate', bounds_error=False),
                 'tout_func': interp1d(xs, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
                 'tall_func': interp1d(xs, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
