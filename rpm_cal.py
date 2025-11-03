@@ -5,6 +5,8 @@ import numpy as np
 from scipy.interpolate import interp1d
 from math import ceil
 import os
+import json
+from pathlib import Path
 
 st.set_page_config(
     page_title="โปรแกรมคำนวณสูตรปุ๋ยและแนะนำการปรับค่าเครื่องจ่ายเกลียวลำเลียง AGN03", 
@@ -153,47 +155,81 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --------- CONFIG ----------
-DEFAULT_EXCEL = "C:\\Users\\Lenovo\\OneDrive\\Desktop\\NPK cal\\กระพ้อ.xlsx"  # ใช้เมื่อรันใน local เท่านั้น
+BASE_DIR = Path(__file__).resolve().parent
+CALIBRATION_JSON = BASE_DIR / "data" / "calibration_default.json"
+DEFAULT_EXCEL = BASE_DIR / "กระพ้อ.xlsx"  # ใช้เมื่อรันใน local เท่านั้น
+# --------- HELPERS ----------
+def load_calibration_from_json(path: Path = CALIBRATION_JSON):
+    """Load embedded calibration data from JSON if available."""
+    try:
+        if path.exists():
+            with path.open('r', encoding='utf-8') as fp:
+                return json.load(fp)
+    except Exception:
+        return None
+    return None
 
 # --------- HELPERS ----------
 def create_default_groups():
     """สร้างข้อมูลตัวอย่างเริ่มต้นสำหรับการทดสอบ (ใช้เมื่อไม่มีไฟล์ Excel)"""
-    # ข้อมูลตัวอย่างพื้นฐาน: rpm และ rate (g/s) สำหรับ N, P, K
-    default_data = {
-        'N': {'rpms': [10, 500, 1000, 1500, 2000, 2500, 2750], 
-              'rates': [0.2, 10, 20, 30, 40, 50, 55]},
-        'P': {'rpms': [10, 500, 1000, 1500, 2000, 2500, 2750], 
-              'rates': [0.15, 7.5, 15, 22.5, 30, 37.5, 41.25]},
-        'K': {'rpms': [10, 500, 1000, 1500, 2000, 2500, 2750], 
-              'rates': [0.1, 5, 10, 15, 20, 25, 27.5]}
-    }
-    
+    # พยายามโหลดจากไฟล์ JSON ที่ฝังอยู่ในโปรแกรมก่อน
+    calibration_data = load_calibration_from_json()
+    if not calibration_data:
+        # Fallback ค่าเดิมถ้าไฟล์หาย
+        calibration_data = {
+            'N': {
+                'rpm': [10, 500, 1000, 1500, 2000, 2500, 2750],
+                'rate_gps': [0.2, 10, 20, 30, 40, 50, 55]
+            },
+            'P': {
+                'rpm': [10, 500, 1000, 1500, 2000, 2500, 2750],
+                'rate_gps': [0.15, 7.5, 15, 22.5, 30, 37.5, 41.25]
+            },
+            'K': {
+                'rpm': [10, 500, 1000, 1500, 2000, 2500, 2750],
+                'rate_gps': [0.1, 5, 10, 15, 20, 25, 27.5]
+            }
+        }
+
     groups = {}
-    for h, data in default_data.items():
-        xs = np.array(data['rpms'], dtype=float)
-        rates = np.array(data['rates'], dtype=float)
-        touts = np.zeros_like(xs)
-        talls = np.full_like(xs, 3600.0)  # 1 ชั่วโมง
-        losses = np.zeros_like(xs)
-        
+    for hopper, data in calibration_data.items():
+        rpm_actual = np.array(data.get('rpm') or data.get('rpms', []), dtype=float)
+        if rpm_actual.size == 0:
+            continue
+        rpm_pct = np.array(data.get('rpm_pct', rpm_actual * 100.0 / 2750.0), dtype=float)
+        rates = np.array(data.get('rate_gps') or data.get('rates', []), dtype=float)
+        touts = np.array(data.get('t_out', np.zeros_like(rpm_actual)), dtype=float)
+        talls = np.array(data.get('t_all', np.full_like(rpm_actual, 3600.0)), dtype=float)
+        losses = np.array(data.get('loss', np.zeros_like(rpm_actual)), dtype=float)
+        effs = np.array(data.get('eff', np.zeros_like(rpm_actual)), dtype=float)
+
+        # สร้าง DataFrame เพื่อใช้แสดงผลใน UI
         data_df = pd.DataFrame({
-            'hopper': h,
-            'rpm': xs,
-            'rpm_pct': xs * 100.0 / 2750.0,
-            'g/s': rates
+            'hopper': hopper,
+            'rpm': rpm_actual,
+            'rpm_pct': rpm_pct,
+            'g/s': rates,
+            't_out': touts,
+            't_all': talls,
+            'loss': losses,
+            'eff': effs
         })
 
-        groups[h] = {
-            'rpm_min': float(xs.min()), 
-            'rpm_max': float(xs.max()),
+        groups[hopper] = {
+            'rpm_min': float(rpm_actual.min()), 
+            'rpm_max': float(rpm_actual.max()),
             'is_percentage': False,
-            'rate_func': interp1d(xs, rates, kind='linear', fill_value='extrapolate', bounds_error=False),
-            'tout_func': interp1d(xs, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
-            'tall_func': interp1d(xs, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
-            'loss_func': interp1d(xs, losses, kind='linear', fill_value='extrapolate', bounds_error=False),
-            'raw_rpms': xs,
-            'raw_rpm_pct': xs * 100.0 / 2750.0,
+            'rate_func': interp1d(rpm_actual, rates, kind='linear', fill_value='extrapolate', bounds_error=False),
+            'tout_func': interp1d(rpm_actual, touts, kind='linear', fill_value='extrapolate', bounds_error=False),
+            'tall_func': interp1d(rpm_actual, talls, kind='linear', fill_value='extrapolate', bounds_error=False),
+            'loss_func': interp1d(rpm_actual, losses, kind='linear', fill_value='extrapolate', bounds_error=False),
+            'raw_rpms': rpm_actual,
+            'raw_rpm_pct': rpm_pct,
             'raw_rates': rates,
+            'raw_t_out': touts,
+            'raw_t_all': talls,
+            'raw_loss': losses,
+            'raw_eff': effs,
             'data': data_df
         }
     return groups
@@ -436,11 +472,12 @@ st.sidebar.markdown("""
 
 # File uploader
 st.sidebar.header("📁 ข้อมูลทดลอง")
-# ตัวเลือกเพื่อทำให้ผลลัพธ์ local ตรงกับบน Cloud ได้ง่าย ๆ
+# ตัวเลือกเพื่อทำให้ผลลัพธ์ตรงกับข้อมูลที่ฝังในโปรแกรมทั้งบน Cloud และเครื่องตัวเอง
+default_force_sample = True
 force_sample = st.sidebar.checkbox(
-    "ใช้ข้อมูลตัวอย่าง (ไม่ใช้ไฟล์ Excel ในเครื่อง)",
-    value=False,
-    help="ติ๊กเพื่อบังคับให้ใช้ข้อมูลตัวอย่างเสมอ จะไม่อ่านไฟล์ Excel ในเครื่อง แม้จะมีไฟล์อยู่"
+    "ใช้ข้อมูลสอบเทียบที่มาพร้อมโปรแกรม",
+    value=default_force_sample,
+    help="ติ๊กเพื่อใช้ข้อมูลสอบเทียบที่บันทึกไว้ในโปรแกรม (ค่าเดียวกับที่ใช้บนเว็บไซต์)"
 )
 
 uploaded_file = st.sidebar.file_uploader(
@@ -482,7 +519,7 @@ if uploaded_file is not None and not force_sample:
         groups = create_default_groups()
         proc_df = None
         data_source = "sample"
-elif (not force_sample) and os.path.exists(DEFAULT_EXCEL):
+elif (not force_sample) and DEFAULT_EXCEL.exists():
     # ใช้ไฟล์ local ถ้ามี (สำหรับการรันใน local)
     groups, proc_df, load_err = load_testdata(DEFAULT_EXCEL)
     if load_err:
@@ -551,12 +588,20 @@ if st.session_state.comp_results is not None:
                 raw_rates = np.asarray(groups[hopper].get('raw_rates', []), dtype=float)
                 if raw_rates.size == 0 and raw_rpms.size:
                     raw_rates = np.zeros_like(raw_rpms)
-                for rpm_val, pct_val, rate_val in zip(raw_rpms, raw_pct, raw_rates):
+                raw_tout = np.asarray(groups[hopper].get('raw_t_out', []), dtype=float)
+                raw_tall = np.asarray(groups[hopper].get('raw_t_all', []), dtype=float)
+                raw_loss = np.asarray(groups[hopper].get('raw_loss', []), dtype=float)
+                raw_eff = np.asarray(groups[hopper].get('raw_eff', []), dtype=float)
+                for i, (rpm_val, pct_val, rate_val) in enumerate(zip(raw_rpms, raw_pct, raw_rates)):
                     preview_rows.append({
                         'Hopper': hopper,
                         '%RPM': round(pct_val, 1),
                         'RPM': round(rpm_val, 1),
-                        'g/s': round(rate_val, 3)
+                        'g/s': round(rate_val, 3),
+                        't_out (s)': round(raw_tout[i], 2) if raw_tout.size > i else None,
+                        't_all (s)': round(raw_tall[i], 2) if raw_tall.size > i else None,
+                        'loss (g)': round(raw_loss[i], 2) if raw_loss.size > i else None,
+                        'efficiency': round(raw_eff[i], 4) if raw_eff.size > i else None
                     })
         if preview_rows:
             preview_df = pd.DataFrame(preview_rows).sort_values(['Hopper', 'RPM']).reset_index(drop=True)
