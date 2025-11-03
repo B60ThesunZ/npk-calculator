@@ -415,6 +415,13 @@ st.sidebar.markdown("""
 
 # File uploader
 st.sidebar.header("📁 ข้อมูลทดลอง")
+# ตัวเลือกเพื่อทำให้ผลลัพธ์ local ตรงกับบน Cloud ได้ง่าย ๆ
+force_sample = st.sidebar.checkbox(
+    "ใช้ข้อมูลตัวอย่าง (ไม่ใช้ไฟล์ Excel ในเครื่อง)",
+    value=False,
+    help="ติ๊กเพื่อบังคับให้ใช้ข้อมูลตัวอย่างเสมอ จะไม่อ่านไฟล์ Excel ในเครื่อง แม้จะมีไฟล์อยู่"
+)
+
 uploaded_file = st.sidebar.file_uploader(
     "อัปโหลดไฟล์ Excel (ถ้ามี)", 
     type=["xlsx", "xls"],
@@ -422,7 +429,8 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 # Load data from uploaded file or default
-if uploaded_file is not None:
+data_source = ""
+if uploaded_file is not None and not force_sample:
     try:
         # Save uploaded file temporarily
         import tempfile
@@ -443,27 +451,33 @@ if uploaded_file is not None:
             st.sidebar.info("กำลังใช้ข้อมูลตัวอย่างแทน")
             groups = create_default_groups()
             proc_df = None
+            data_source = "sample"
         else:
             st.sidebar.success("✅ ใช้ข้อมูลจากไฟล์ที่อัปโหลด")
+            data_source = "uploaded"
     except Exception as e:
         st.sidebar.error(f"เกิดข้อผิดพลาด: {e}")
         st.sidebar.info("กำลังใช้ข้อมูลตัวอย่างแทน")
         groups = create_default_groups()
         proc_df = None
-elif os.path.exists(DEFAULT_EXCEL):
+        data_source = "sample"
+elif (not force_sample) and os.path.exists(DEFAULT_EXCEL):
     # ใช้ไฟล์ local ถ้ามี (สำหรับการรันใน local)
     groups, proc_df, load_err = load_testdata(DEFAULT_EXCEL)
     if load_err:
         st.sidebar.warning("ไม่พบไฟล์ข้อมูล - ใช้ข้อมูลตัวอย่าง")
         groups = create_default_groups()
         proc_df = None
+        data_source = "sample"
     else:
         st.sidebar.info("📊 ใช้ข้อมูลจากไฟล์ local")
+        data_source = "local-excel"
 else:
     # ใช้ข้อมูลตัวอย่างเริ่มต้น
     st.sidebar.info("📊 ใช้ข้อมูลตัวอย่างเริ่มต้น")
     groups = create_default_groups()
     proc_df = None
+    data_source = "sample"
 
 # Initialize session state for results
 if 'rpm_results' not in st.session_state:
@@ -496,6 +510,14 @@ if st.button("คำนวณสูตรและหา %RPM/เวลา"):
 if st.session_state.comp_results is not None:
     comp = st.session_state.comp_results
     st.subheader("ผลการคำนวณแม่ปุ๋ย")
+    # แสดงแหล่งที่มาของข้อมูล เพื่อความชัดเจนว่ากำลังใช้ข้อมูลใด
+    source_label = {
+        "uploaded": "ไฟล์ที่อัปโหลด",
+        "local-excel": "ไฟล์ Excel ในเครื่อง",
+        "sample": "ข้อมูลตัวอย่าง"
+    }.get(data_source, data_source)
+    if source_label:
+        st.caption(f"แหล่งข้อมูล: {source_label}")
     
     # Display in colored metrics
     col1, col2, col3 = st.columns(3)
