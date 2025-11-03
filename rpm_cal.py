@@ -333,9 +333,16 @@ def evaluate_run_for_t_with_targets(groups, target_masses_g, t, tol=0.05, cap_by
         mass_usable = float(usable_masses[idx])
         rel_err = abs(mass_usable - target) / (target + 1e-9)
         
-        # rpms[idx] เป็น %RPM อยู่แล้ว (เพราะเราใช้ %RPM ใน interpolation)
-        rpm_pct = float(rpms[idx])
-        rpm_actual = rpm_pct * 2750.0 / 100.0  # แปลง % เป็น RPM จริง
+        # ตรวจสอบว่าข้อมูลเป็น %RPM หรือ RPM เต็ม
+        rpm_value = float(rpms[idx])
+        if funcs.get('is_percentage', False):
+            # ข้อมูลเป็น %RPM อยู่แล้ว
+            rpm_pct = rpm_value
+            rpm_actual = rpm_pct * 2750.0 / 100.0
+        else:
+            # ข้อมูลเป็น RPM เต็ม ต้องแปลงเป็น %
+            rpm_actual = rpm_value
+            rpm_pct = rpm_value * 100.0 / 2750.0
         
         rpm_choices[h] = {
             'rpm_actual': rpm_actual,
